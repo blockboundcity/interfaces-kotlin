@@ -416,16 +416,15 @@ public abstract class AbstractInterfaceView<I : InterfacesInventory, T : Interfa
         return itemsByPoint
     }
 
-    override val persistentItems: Map<GridPoint, ItemStack>
-        get() {
-            val inventory = player.openInventory.topInventory
+    override fun getPersistentItems(): Map<GridPoint, ItemStack> {
+        val inventory = player.openInventory.topInventory
 
-            if (inventory.getHolder(false) != this) {
-                return addedItems // return persisted added items for the closed view
-            }
-
-            return getPersistentItems(inventory)
+        if (inventory.getHolder(false) != this) {
+            return addedItems // return persisted added items for the closed view
         }
+
+        return getPersistentItems(inventory)
+    }
 
     override fun setPersistentItem(point: GridPoint, itemStack: ItemStack): Boolean {
         if (completedPane?.getRawUnordered(point) != null) {

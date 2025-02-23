@@ -32,7 +32,7 @@ public class PersistentItemsExampleInterface(private val plugin: ExamplePlugin) 
             Bukkit.getScheduler().runTask(
                 plugin,
                 Runnable {
-                    val copy = view.persistentItems.toMap()
+                    val copy = view.getPersistentItems().toMap()
 
                     copy.forEach { (point, itemStack) ->
                         view.setPersistentItem(point, ItemStack.empty())
@@ -47,7 +47,7 @@ public class PersistentItemsExampleInterface(private val plugin: ExamplePlugin) 
         withTransform(persistentSlotTrigger) { pane, view ->
             println("re-render")
 
-            val item = view.persistentItems[GridPoint(0, 1)]
+            val item = view.getPersistentItems()[GridPoint(0, 1)]
             val itemName = item?.type?.name ?: "Empty"
 
             val deleteItem = ItemStack(Material.ACACIA_SIGN).name("Delete $itemName")

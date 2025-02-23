@@ -34,8 +34,6 @@ public interface InterfaceView {
      */
     public val isTreeOpened: Boolean
 
-    public val persistentItems: Map<GridPoint, ItemStack>
-
     /** Opens up this view. */
     public suspend fun open()
 
@@ -84,6 +82,8 @@ public interface InterfaceView {
      * Will fail if this view is not open.
      */
     public fun runChatQuery(timeout: Duration = 30.seconds, onCancel: suspend () -> Unit = {}, onComplete: suspend (Component) -> Boolean)
+
+    public fun getPersistentItems(): Map<GridPoint, ItemStack>
 
     public fun setPersistentItem(point: GridPoint, itemStack: ItemStack): Boolean
 }

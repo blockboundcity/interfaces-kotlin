@@ -1,9 +1,11 @@
 package com.noxcrew.interfaces.view
 
+import com.noxcrew.interfaces.grid.GridPoint
 import kotlinx.coroutines.CoroutineScope
 import net.kyori.adventure.text.Component
 import org.bukkit.entity.Player
 import org.bukkit.event.inventory.InventoryCloseEvent
+import org.bukkit.inventory.ItemStack
 import kotlin.coroutines.coroutineContext
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -31,6 +33,8 @@ public interface InterfaceView {
      * a parent view is still valid based on whether any of its children are open.
      */
     public val isTreeOpened: Boolean
+
+    public val persistentItems: Map<GridPoint, ItemStack>
 
     /** Opens up this view. */
     public suspend fun open()
@@ -80,4 +84,6 @@ public interface InterfaceView {
      * Will fail if this view is not open.
      */
     public fun runChatQuery(timeout: Duration = 30.seconds, onCancel: suspend () -> Unit = {}, onComplete: suspend (Component) -> Boolean)
+
+    public fun setPersistentItem(point: GridPoint, itemStack: ItemStack): Boolean
 }

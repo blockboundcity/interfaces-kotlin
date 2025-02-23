@@ -42,7 +42,7 @@ public abstract class AbstractInterfaceView<I : InterfacesInventory, T : Interfa
     override val player: Player,
     /** The interface backing this view. */
     public val backing: T,
-    private val parent: InterfaceView?
+    private val parent: InterfaceView?,
 ) : InterfaceView {
 
     public companion object {
@@ -61,7 +61,7 @@ public abstract class AbstractInterfaceView<I : InterfacesInventory, T : Interfa
         get() = backing.builder
 
     /** Added persistent items added when this interface was last closed. */
-    public val addedItems: MutableMap<GridPoint, ItemStack> = mutableMapOf()
+    public var addedItems: MutableMap<GridPoint, ItemStack> = mutableMapOf()
 
     /** Whether the view is being painted for the first time. */
     protected var firstPaint: Boolean = true
@@ -110,7 +110,7 @@ public abstract class AbstractInterfaceView<I : InterfacesInventory, T : Interfa
         coroutineScope: CoroutineScope,
         reason: InventoryCloseEvent.Reason = InventoryCloseEvent.Reason.UNKNOWN,
         changingView: Boolean = reason ==
-            InventoryCloseEvent.Reason.OPEN_NEW
+            InventoryCloseEvent.Reason.OPEN_NEW,
     ) {
         if (!changingView) {
             // End a possible chat query with the listener (unless we're changing views)
@@ -197,7 +197,7 @@ public abstract class AbstractInterfaceView<I : InterfacesInventory, T : Interfa
 
         // If this menu overlaps the player inventory we always
         // need to do a brand new first paint every time!
-        if (firstPaint || this !is ChestInterfaceView) {
+        if (firstPaint || this.backing.includesPlayerInventory) {
             firstPaint = true
             setup()
         } else {
@@ -284,7 +284,7 @@ public abstract class AbstractInterfaceView<I : InterfacesInventory, T : Interfa
                 // Start the job if it's not running currently!
                 if (transformingJob == null || transformingJob?.isCompleted == true) {
                     transformingJob = SCOPE.launch(
-                        InterfacesCoroutineDetails(player.uniqueId, "running and applying a transform")
+                        InterfacesCoroutineDetails(player.uniqueId, "running and applying a transform"),
                     ) {
                         // Go through all pending transforms one at a time until
                         // we're fully done with all of them. Other threads may
@@ -347,7 +347,7 @@ public abstract class AbstractInterfaceView<I : InterfacesInventory, T : Interfa
             currentInventory.set(
                 row,
                 column,
-                element.itemStack.apply { this?.let { builder.itemPostProcessor?.invoke(it) } }
+                element.itemStack.apply { this?.let { builder.itemPostProcessor?.invoke(it) } },
             )
             leftovers -= row to column
             madeChanges = true
@@ -364,7 +364,7 @@ public abstract class AbstractInterfaceView<I : InterfacesInventory, T : Interfa
                 currentInventory.set(
                     row,
                     column,
-                    item
+                    item,
                 )
                 leftovers -= row to column
                 madeChanges = true
@@ -390,9 +390,14 @@ public abstract class AbstractInterfaceView<I : InterfacesInventory, T : Interfa
     /** Saves any persistent items based on [inventory]. */
     public fun savePersistentItems(inventory: Inventory) {
         if (!builder.persistAddedItems) return
+        addedItems = getPersistentItems(inventory)
+    }
 
-        addedItems.clear()
+    private fun getPersistentItems(inventory: Inventory): MutableMap<GridPoint, ItemStack> {
         val contents = inventory.contents
+
+        val itemsByPoint = mutableMapOf<GridPoint, ItemStack>()
+
         for (index in contents.indices) {
             // Ignore empty slots
             val stack = contents[index] ?: continue
@@ -405,8 +410,43 @@ public abstract class AbstractInterfaceView<I : InterfacesInventory, T : Interfa
             if (completedPane?.getRawUnordered(point) != null) continue
 
             // Store this item
-            addedItems[point] = stack
+            itemsByPoint[point] = stack
         }
+
+        return itemsByPoint
+    }
+
+    override val persistentItems: Map<GridPoint, ItemStack>
+        get() {
+            val inventory = player.openInventory.topInventory
+
+            if (inventory.getHolder(false) != this) {
+                return addedItems // return persisted added items for the closed view
+            }
+
+            return getPersistentItems(inventory)
+        }
+
+    override fun setPersistentItem(point: GridPoint, itemStack: ItemStack): Boolean {
+        if (completedPane?.getRawUnordered(point) != null) {
+            return false
+        }
+
+        if (itemStack.isEmpty) {
+            addedItems.remove(point)
+        } else {
+            addedItems[point] = itemStack
+        }
+
+        val isOpen = player.openInventory.topInventory.getHolder(false) == this
+
+        if (isOpen) {
+            InterfacesListeners.INSTANCE.runSync {
+                currentInventory.set(point.x, point.y, itemStack)
+            }
+        }
+
+        return true
     }
 
     override fun onOpen() {

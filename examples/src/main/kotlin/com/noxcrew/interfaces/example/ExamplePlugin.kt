@@ -24,20 +24,19 @@ import org.incendo.cloud.paper.LegacyPaperCommandManager
 
 public class ExamplePlugin : JavaPlugin(), Listener {
 
-    private companion object {
-        private val INTERFACES = listOf(
-            DelayedRequestExampleInterface(),
-            ChangingTitleExampleInterface(),
-            CatalogueExampleInterface(),
-            MovingExampleInterface(),
-            TabbedExampleInterface()
-        )
-    }
-
     private val counterProperty = interfaceProperty(5)
     private var counter by counterProperty
 
     override fun onEnable() {
+        val exampleInterfaces = listOf(
+            DelayedRequestExampleInterface(),
+            ChangingTitleExampleInterface(),
+            CatalogueExampleInterface(),
+            MovingExampleInterface(),
+            TabbedExampleInterface(),
+            PersistentItemsExampleInterface(this),
+        )
+
         val commandManager = LegacyPaperCommandManager.createNative(this, ExecutionCoordinator.asyncCoordinator())
         commandManager.buildAndRegister("interfaces") {
             registerCopy {
@@ -72,7 +71,7 @@ public class ExamplePlugin : JavaPlugin(), Listener {
                 }
             }
 
-            for (registrableInterface in INTERFACES) {
+            for (registrableInterface in exampleInterfaces) {
                 registerCopy {
                     literal(registrableInterface.subcommand)
 

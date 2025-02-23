@@ -1,6 +1,7 @@
 package com.noxcrew.interfaces.interfaces
 
 import com.noxcrew.interfaces.pane.Pane
+import com.noxcrew.interfaces.properties.PersistentSlotTrigger
 import com.noxcrew.interfaces.properties.Trigger
 import com.noxcrew.interfaces.transform.AppliedTransform
 import com.noxcrew.interfaces.transform.ReactiveTransform
@@ -17,11 +18,15 @@ public abstract class InterfaceBuilder<P : Pane, I : Interface<I, P>> : Interfac
     public val transforms: Collection<AppliedTransform<P>>
         get() = _transforms
 
+    public val persistentSlotTriggers: MutableList<PersistentSlotTrigger> = mutableListOf()
+
     /** Creates the interface. */
     public abstract fun build(): I
 
     /** Adds a new transform to the interface that updates whenever [triggers] change. */
     public fun withTransform(vararg triggers: Trigger, transform: Transform<P>) {
+        persistentSlotTriggers.addAll(triggers.filterIsInstance<PersistentSlotTrigger>())
+
         _transforms += AppliedTransform(transformCounter, triggers.toSet(), transform)
     }
 

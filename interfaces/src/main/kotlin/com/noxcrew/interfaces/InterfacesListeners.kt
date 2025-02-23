@@ -10,6 +10,7 @@ import com.noxcrew.interfaces.click.ClickHandler
 import com.noxcrew.interfaces.click.CompletableClickHandler
 import com.noxcrew.interfaces.grid.GridPoint
 import com.noxcrew.interfaces.pane.PlayerPane
+import com.noxcrew.interfaces.slot.AffectedSlot
 import com.noxcrew.interfaces.utilities.InterfacesCoroutineDetails
 import com.noxcrew.interfaces.view.AbstractInterfaceView
 import com.noxcrew.interfaces.view.ChestInterfaceView
@@ -75,7 +76,7 @@ public class InterfacesListeners private constructor(private val plugin: Plugin)
             Reason.PLUGIN,
             Reason.TELEPORT,
             Reason.CANT_USE,
-            Reason.UNLOADED
+            Reason.UNLOADED,
         )
 
         /** An incomplete set of blocks that have some interaction when clicked on. */
@@ -85,7 +86,7 @@ public class InterfacesListeners private constructor(private val plugin: Plugin)
                     MaterialTags.WOODEN_DOORS,
                     MaterialTags.WOODEN_TRAPDOORS,
                     MaterialTags.FENCE_GATES,
-                    MaterialSetTag.BUTTONS
+                    MaterialSetTag.BUTTONS,
                 )
                 // Add blocks with inventories
                 .add(
@@ -100,7 +101,7 @@ public class InterfacesListeners private constructor(private val plugin: Plugin)
                     Material.LOOM,
                     Material.CARTOGRAPHY_TABLE,
                     Material.ENCHANTING_TABLE,
-                    Material.SMITHING_TABLE
+                    Material.SMITHING_TABLE,
                 )
                 .add(Material.LEVER)
                 .add(Material.CAKE)
@@ -109,25 +110,25 @@ public class InterfacesListeners private constructor(private val plugin: Plugin)
                     Material.COPPER_DOOR,
                     Material.EXPOSED_COPPER_DOOR,
                     Material.WEATHERED_COPPER_DOOR,
-                    Material.OXIDIZED_COPPER_DOOR
+                    Material.OXIDIZED_COPPER_DOOR,
                 )
                 .add(
                     Material.WAXED_COPPER_DOOR,
                     Material.WAXED_EXPOSED_COPPER_DOOR,
                     Material.WAXED_WEATHERED_COPPER_DOOR,
-                    Material.WAXED_OXIDIZED_COPPER_DOOR
+                    Material.WAXED_OXIDIZED_COPPER_DOOR,
                 )
                 .add(
                     Material.COPPER_TRAPDOOR,
                     Material.EXPOSED_COPPER_TRAPDOOR,
                     Material.WEATHERED_COPPER_TRAPDOOR,
-                    Material.OXIDIZED_COPPER_TRAPDOOR
+                    Material.OXIDIZED_COPPER_TRAPDOOR,
                 )
                 .add(
                     Material.WAXED_COPPER_TRAPDOOR,
                     Material.WAXED_EXPOSED_COPPER_TRAPDOOR,
                     Material.WAXED_WEATHERED_COPPER_TRAPDOOR,
-                    Material.WAXED_OXIDIZED_COPPER_TRAPDOOR
+                    Material.WAXED_OXIDIZED_COPPER_TRAPDOOR,
                 )
                 // You can click signs to edit them
                 .add(MaterialTags.SIGNS)
@@ -138,7 +139,7 @@ public class InterfacesListeners private constructor(private val plugin: Plugin)
         val view: InterfaceView,
         val onCancel: suspend () -> Unit,
         val onComplete: suspend (Component) -> Boolean,
-        val id: UUID
+        val id: UUID,
     )
 
     /** The view currently being opened. */
@@ -292,6 +293,107 @@ public class InterfacesListeners private constructor(private val plugin: Plugin)
         }
     }
 
+    // List of <GridPoint, isPlayerInventory>
+    private fun getOtherAffectedSlots(
+        event: InventoryClickEvent,
+        holder: InventoryHolder?,
+        view: AbstractInterfaceView<*, *, *>,
+    ): List<AffectedSlot> {
+        if (view.backing.includesPlayerInventory) {
+            // If you use a number key, get the item you're swapping with
+            if (event.click == ClickType.NUMBER_KEY) {
+                return listOf(
+                    AffectedSlot(
+                        view.backing.relativizePlayerInventorySlot(GridPoint.at(3, event.hotbarButton)),
+                        true,
+                    ),
+                )
+            }
+
+            // If you try to swap with the off-hand we have to specifically check for that.
+            if (event.click == ClickType.SWAP_OFFHAND) {
+                return listOf(
+                    AffectedSlot(
+                        view.backing.relativizePlayerInventorySlot(GridPoint.at(4, 4)),
+                        true,
+                    ),
+                )
+            }
+        }
+
+        val topInventory = event.view.topInventory
+        val bottomInventory = event.view.bottomInventory
+
+        // When double-clicking, get items the user is collecting
+        if (event.click == ClickType.DOUBLE_CLICK) {
+            val clickedItem = event.cursor
+            val isInPlayerInventory = holder is Player
+
+            return buildList {
+                // Don't check top inventory if we're in the player inventory!
+                if (!isInPlayerInventory) {
+                    addAll(
+                        topInventory.withIndex().mapNotNull { (index, it) ->
+                            // Check if any item is being collected that cannot be moved!
+                            if (it != null && it.isSimilar(clickedItem)) {
+                                AffectedSlot(requireNotNull(GridPoint.fromBukkitChestSlot(index)), false)
+                            } else {
+                                null
+                            }
+                        },
+                    )
+                }
+
+                addAll(
+                    bottomInventory.withIndex().mapNotNull { (index, it) ->
+                        if (it != null && it.isSimilar(clickedItem)) {
+                            // These slots are always in the player inventory and always need to be relativized!
+                            AffectedSlot(
+                                view.backing.relativizePlayerInventorySlot(requireNotNull(GridPoint.fromBukkitPlayerSlot(index))),
+                                true,
+                            )
+                        } else {
+                            null
+                        }
+                    },
+                )
+            }
+        }
+
+        // If it's a shift click we have to detect what slot is being edited
+        if (event.click.isShiftClick && event.clickedInventory != null) {
+            val clickedInventory = event.clickedInventory!!
+            val otherInventory = if (clickedInventory == topInventory) bottomInventory else topInventory
+
+            // Ideally we predict which slot got shift clicked into! We start by finding any
+            // stack that this item can be added onto, after that we find the first empty slot.
+            val isMovingIntoPlayerInventory = otherInventory.getHolder(false) is Player
+            val firstEmptySlot = otherInventory.indexOfFirst {
+                it != null && !it.isEmpty && it.isSimilar(event.currentItem ?: ItemStack.empty())
+            }.takeIf { it != -1 } ?: otherInventory.indexOfFirst { it == null || it.isEmpty }
+
+            if (firstEmptySlot != -1) {
+                val targetSlot = requireNotNull(GridPoint.fromBukkitChestSlot(firstEmptySlot))
+
+                // If we are shift clicking into the player inventory
+                // we need to offset the target point into the inventory rows.
+                val offsetPoint = if (isMovingIntoPlayerInventory) {
+                    view.backing.relativizePlayerInventorySlot(targetSlot)
+                } else {
+                    targetSlot
+                }
+
+                return listOf(AffectedSlot(offsetPoint, isMovingIntoPlayerInventory))
+            }
+        }
+
+        // It'd be nice if we had a way to redirect which slot gets shift clicked into, but this causes a giant mess
+        // of plugin compatibility. The cleanest solution is for users to place invisible items in all taken slots and
+        // to leave clickable slots open.
+
+        return emptyList()
+    }
+
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public fun onClick(event: InventoryClickEvent) {
         val holder = event.inventory.getHolder(false)
@@ -307,104 +409,12 @@ public class InterfacesListeners private constructor(private val plugin: Plugin)
         // If the event is not cancelled we add extra prevention checks if any of the involved
         // slots are not allowed to be modified!
         if (!event.isCancelled) {
-            if (view.backing.includesPlayerInventory) {
-                // If you use a number key we check if the item you're swapping with is
-                // protected.
-                if (event.click == ClickType.NUMBER_KEY &&
-                    !canFreelyMove(
-                        view,
-                        view.backing.relativizePlayerInventorySlot(GridPoint.at(3, event.hotbarButton)),
-                        true
-                    )
-                ) {
-                    event.isCancelled = true
-                    return
-                }
+            val otherAffectedSlots = getOtherAffectedSlots(event, holder, view)
 
-                // If you try to swap with the off-hand we have to specifically check for that.
-                if (event.click == ClickType.SWAP_OFFHAND &&
-                    !canFreelyMove(
-                        view,
-                        view.backing.relativizePlayerInventorySlot(GridPoint.at(4, 4)),
-                        true
-                    )
-                ) {
-                    event.isCancelled = true
-                    return
-                }
-            }
-
-            // Prevent double-clicking if it involves stealing any items
-            val topInventory = event.view.topInventory
-            val bottomInventory = event.view.bottomInventory
-            if (event.click == ClickType.DOUBLE_CLICK) {
-                val clickedItem = event.cursor
-                val isInPlayerInventory = holder is Player
-
-                // Don't check top inventory if we're in the player inventory!
-                if (
-                    (
-                        !isInPlayerInventory &&
-                            topInventory.withIndex().any { (index, it) ->
-                                // Check if any item is being collected that cannot be moved!
-                                it != null &&
-                                    it.isSimilar(clickedItem) &&
-                                    !canFreelyMove(
-                                        view,
-                                        requireNotNull(GridPoint.fromBukkitChestSlot(index)),
-                                        false
-                                    )
-                            }
-                        ) ||
-                    bottomInventory.withIndex().any { (index, it) ->
-                        it != null &&
-                            it.isSimilar(clickedItem) &&
-                            // These slots are always in the player inventory and always need to be relativized!
-                            !canFreelyMove(
-                                view,
-                                view.backing.relativizePlayerInventorySlot(
-                                    requireNotNull(GridPoint.fromBukkitPlayerSlot(index))
-                                ),
-                                true
-                            )
-                    }
-                ) {
-                    event.isCancelled = true
-                    return
-                }
-            }
-
-            // If it's a shift click we have to detect what slot is being edited
-            if (event.click.isShiftClick && event.clickedInventory != null) {
-                val clickedInventory = event.clickedInventory!!
-                val otherInventory = if (clickedInventory == topInventory) bottomInventory else topInventory
-
-                // Ideally we predict which slot got shift clicked into! We start by finding any
-                // stack that this item can be added onto, after that we find the first empty slot.
-                val isMovingIntoPlayerInventory = otherInventory.getHolder(false) is Player
-                val firstEmptySlot = otherInventory.indexOfFirst {
-                    it != null && !it.isEmpty && it.isSimilar(event.currentItem ?: ItemStack.empty())
-                }.takeIf { it != -1 } ?: otherInventory.indexOfFirst { it == null || it.isEmpty }
-
-                if (firstEmptySlot != -1) {
-                    val targetSlot = requireNotNull(GridPoint.fromBukkitChestSlot(firstEmptySlot))
-
-                    if (!canFreelyMove(
-                            view,
-                            // If we are shift clicking into the player inventory
-                            // we need to offset the target point into the inventory rows.
-                            if (isMovingIntoPlayerInventory) {
-                                view.backing.relativizePlayerInventorySlot(targetSlot)
-                            } else {
-                                targetSlot
-                            },
-                            isMovingIntoPlayerInventory
-                        )
-                    ) {
-                        event.isCancelled = true
-                        return
-                    }
-                }
+            if (otherAffectedSlots.any { !canFreelyMove(view, it) }) {
+                event.isCancelled = true
+            } else {
+                triggerSlotUpdateTriggers(view, listOf(AffectedSlot(clickedPoint, isPlayerInventory)) + otherAffectedSlots)
             }
 
             // It'd be nice if we had a way to redirect which slot gets shift clicked into, but this causes a giant mess
@@ -417,12 +427,16 @@ public class InterfacesListeners private constructor(private val plugin: Plugin)
     public fun onDrag(event: InventoryDragEvent) {
         val holder = event.inventory.getHolder(false)
         val view = convertHolderToInterfaceView(holder) ?: return
-        for (slot in event.rawSlots) {
-            val clickedPoint = GridPoint.fromBukkitChestSlot(slot) ?: continue
-            if (!canFreelyMove(view, clickedPoint, slot >= event.inventory.size)) {
-                event.isCancelled = true
-                return
+
+        val affectedSlots =
+            event.rawSlots.mapNotNull { slot ->
+                GridPoint.fromBukkitChestSlot(slot)?.let { AffectedSlot(it, slot >= event.inventory.size) }
             }
+
+        if (affectedSlots.any { !canFreelyMove(view, it) }) {
+            event.isCancelled = true
+        } else {
+            triggerSlotUpdateTriggers(view, affectedSlots)
         }
     }
 
@@ -456,15 +470,14 @@ public class InterfacesListeners private constructor(private val plugin: Plugin)
                 GridPoint.at(3, player.inventory.heldItemSlot)
             } else {
                 PlayerPane.OFF_HAND_SLOT
-            }
+            },
         )
         val click = convertAction(event.action, player.isSneaking)
 
-        // Check if the action is prevented if this slot is not freely
-        // movable
-        if (!canFreelyMove(view, clickedPoint, true) &&
-            event.action in view.builder.preventedInteractions
-        ) {
+        val affectedSlot = AffectedSlot(clickedPoint, true)
+
+        // Check if the action is prevented if this slot is not freely movable
+        if (!canFreelyMove(view, affectedSlot) && event.action in view.builder.preventedInteractions) {
             event.isCancelled = true
             return
         }
@@ -477,6 +490,10 @@ public class InterfacesListeners private constructor(private val plugin: Plugin)
                 event.isCancelled = true
             }
         }
+
+        if (event.useItemInHand() != Event.Result.DENY) {
+            triggerSlotUpdateTriggers(view, listOf(affectedSlot))
+        }
     }
 
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
@@ -486,9 +503,13 @@ public class InterfacesListeners private constructor(private val plugin: Plugin)
         val slot = player.inventory.heldItemSlot
         val droppedSlot = GridPoint.at(3, slot)
 
+        val affectedSlot = AffectedSlot(view.backing.relativizePlayerInventorySlot(droppedSlot), true)
+
         // Don't allow dropping items that cannot be freely edited
-        if (!canFreelyMove(view, view.backing.relativizePlayerInventorySlot(droppedSlot), true)) {
+        if (!canFreelyMove(view, affectedSlot)) {
             event.isCancelled = true
+        } else {
+            triggerSlotUpdateTriggers(view, listOf(affectedSlot))
         }
     }
 
@@ -500,11 +521,16 @@ public class InterfacesListeners private constructor(private val plugin: Plugin)
         val interactedSlot1 = GridPoint.at(3, slot)
         val interactedSlot2 = GridPoint.at(4, 4)
 
+        val affectedSlots = listOf(
+            AffectedSlot(view.backing.relativizePlayerInventorySlot(interactedSlot1), true),
+            AffectedSlot(view.backing.relativizePlayerInventorySlot(interactedSlot2), true)
+        )
+
         // Don't allow swapping items that cannot be freely edited
-        if (!canFreelyMove(view, view.backing.relativizePlayerInventorySlot(interactedSlot1), true) ||
-            !canFreelyMove(view, view.backing.relativizePlayerInventorySlot(interactedSlot2), true)
-        ) {
+        if (affectedSlots.any { !canFreelyMove(view, it) }) {
             event.isCancelled = true
+        } else {
+            triggerSlotUpdateTriggers(view, affectedSlots)
         }
     }
 
@@ -520,7 +546,7 @@ public class InterfacesListeners private constructor(private val plugin: Plugin)
         for (index in GridPoint.PLAYER_INVENTORY_RANGE) {
             val stack = event.player.inventory.getItem(index) ?: continue
             val point = GridPoint.fromBukkitPlayerSlot(index) ?: continue
-            if (!canFreelyMove(view, view.backing.relativizePlayerInventorySlot(point), true)) {
+            if (!canFreelyMove(view, AffectedSlot(view.backing.relativizePlayerInventorySlot(point), true))) {
                 var removed = false
 
                 // Remove the first item in drops that is similar, drops will be a list
@@ -587,19 +613,19 @@ public class InterfacesListeners private constructor(private val plugin: Plugin)
     }
 
     /** Returns whether [clickedPoint] in [view] can be freely moved. */
-    private fun canFreelyMove(view: AbstractInterfaceView<*, *, *>, clickedPoint: GridPoint, isPlayerInventory: Boolean): Boolean {
+    private fun canFreelyMove(view: AbstractInterfaceView<*, *, *>, affectedSlot: AffectedSlot): Boolean {
         // If we don't allow clicking empty slots we never allow freely moving
         if (view.builder.preventClickingEmptySlots &&
-            !(view.builder.allowClickingOwnInventoryIfClickingEmptySlotsIsPrevented && isPlayerInventory)
+            !(view.builder.allowClickingOwnInventoryIfClickingEmptySlotsIsPrevented && affectedSlot.isPlayerInventory)
         ) {
             return false
         }
 
         // If this inventory has no player inventory then the player inventory is always allowed to be edited
-        if (!view.backing.includesPlayerInventory && isPlayerInventory) return true
+        if (!view.backing.includesPlayerInventory && affectedSlot.isPlayerInventory) return true
 
         // If there is no item here we allow editing
-        return view.completedPane?.getRaw(clickedPoint) == null
+        return view.completedPane?.getRaw(affectedSlot.point) == null
     }
 
     /** Handles a [view] being clicked at [clickedPoint] through some [event]. */
@@ -609,7 +635,7 @@ public class InterfacesListeners private constructor(private val plugin: Plugin)
         click: ClickType,
         slot: Int,
         isPlayerInventory: Boolean,
-        interact: Boolean
+        interact: Boolean,
     ): Boolean {
         // Determine the type of click, if nothing was clicked we allow it
         val raw = view.completedPane?.getRaw(clickedPoint)
@@ -654,7 +680,7 @@ public class InterfacesListeners private constructor(private val plugin: Plugin)
             Bukkit.getScheduler().runTaskLaterAsynchronously(
                 plugin,
                 Runnable { completedClickHandler.cancel() },
-                120
+                120,
             )
         }
 
@@ -691,7 +717,7 @@ public class InterfacesListeners private constructor(private val plugin: Plugin)
         view: InterfaceView,
         timeout: Duration,
         onCancel: suspend () -> Unit,
-        onComplete: suspend (Component) -> Boolean
+        onComplete: suspend (Component) -> Boolean,
     ) {
         // Determine if the player has this inventory open
         if (!view.isOpen()) return
@@ -721,8 +747,8 @@ public class InterfacesListeners private constructor(private val plugin: Plugin)
                 view,
                 onCancel,
                 onComplete,
-                id
-            )
+                id,
+            ),
         )
 
         // Set a timer for to automatically cancel this query to prevent players
@@ -740,7 +766,7 @@ public class InterfacesListeners private constructor(private val plugin: Plugin)
                     view.reopen()
                 }
             },
-            timeout.inWholeMilliseconds / 50
+            timeout.inWholeMilliseconds / 50,
         )
     }
 
@@ -773,5 +799,19 @@ public class InterfacesListeners private constructor(private val plugin: Plugin)
         }
 
         Bukkit.getScheduler().callSyncMethod(plugin, function)
+    }
+
+    // todo/caveats:
+    // - not sure if this will currently trigger for the player inventory for things like eating food, firing arrows, etc.
+    private fun triggerSlotUpdateTriggers(view: AbstractInterfaceView<*, *, *>, affectedSlots: List<AffectedSlot>) {
+        val filteredSlots = if (view.backing.includesPlayerInventory) {
+            affectedSlots
+        } else {
+            affectedSlots.filter { !it.isPlayerInventory }
+        }
+
+        val points = filteredSlots.map { it.point }
+
+        view.builder.persistentSlotTriggers.forEach { trigger -> trigger.handleSlotUpdates(points) }
     }
 }

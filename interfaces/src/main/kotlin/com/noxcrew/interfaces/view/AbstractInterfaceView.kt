@@ -446,6 +446,8 @@ public abstract class AbstractInterfaceView<I : InterfacesInventory, T : Interfa
             }
         }
 
+        backing.builder.persistentSlotTriggers.forEach { it.handleSlotUpdates(listOf(point)) }
+
         return true
     }
 
